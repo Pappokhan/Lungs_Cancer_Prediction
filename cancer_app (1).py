@@ -225,7 +225,7 @@ if "result" in st.session_state:
     href = f'''
     <a href="data:application/pdf;base64,{b64}" download="AeroLung_AI_Report_{datetime.now().strftime("%Y%m%d_%H%M")}.pdf">
         <button style="background:#dc2626; color:white; padding:1rem 3rem; border:none; border-radius:12px; font-size:1.2rem; cursor:pointer; width:100%; font-weight:bold;">
-            Download Professional PDF Report
+            Download PDF Report
         </button>
     </a>
     '''
