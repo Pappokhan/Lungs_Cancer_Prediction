@@ -70,8 +70,8 @@ model = load_model()
 # ========================= HEADER =========================
 st.markdown("""
 <div class="header-box">
-    <h1>Lungs AeroLung AI</h1>
-    <h3>Advanced Lung Cancer Risk Prediction System</h3>
+    <h1>AeroLung AI</h1>
+    <h3>Lung Cancer Risk Prediction System</h3>
     <p>Clinical-Grade Stacking Ensemble • Calibrated Probability Output</p>
 </div>
 """, unsafe_allow_html=True)
