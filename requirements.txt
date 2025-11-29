@@ -8,3 +8,4 @@ catboost
 pandas
 plotly
 reportlab
+kaleido
