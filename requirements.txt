@@ -8,4 +8,4 @@ catboost
 pandas
 plotly
 reportlab
-kaleido
+kaleido==0.2.1
