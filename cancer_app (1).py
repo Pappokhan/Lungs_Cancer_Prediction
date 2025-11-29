@@ -4,14 +4,32 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
 from io import BytesIO
+import base64
+import os
+import plotly.io as pio
+
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-import base64
 
-st.set_page_config(page_title="AeroLung AI • Lung Cancer Risk Prediction", page_icon="Lungs", layout="centered", initial_sidebar_state="collapsed")
+# ============ CRITICAL FIX FOR STREAMLIT CLOUD ============
+# This makes Plotly + Kaleido work on Linux/Streamlit Cloud
+pio.kaleido.scope.chromium_args += (
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--single-process",
+    "--disable-extensions",
+    "--disable-features=TranslateUI",
+    "--disable-ipc-flooding-protection",
+)
+
+# =========================================================
+
+st.set_page_config(page_title="AeroLung AI • Lung Cancer Risk Prediction", page_icon="Lungs", layout="centered")
 
 st.markdown("""
 <style>
@@ -29,6 +47,7 @@ st.markdown("""
 @st.cache_resource
 def load_model():
     return joblib.load('LungCancer_Stacking_100.pkl')
+
 model = load_model()
 
 st.markdown("""
@@ -40,7 +59,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("### Patient Information & Risk Factors")
+
 col1, col2 = st.columns(2)
+
 with col1:
     st.markdown("<div class='feature-card'>", unsafe_allow_html=True)
     st.subheader("Lifestyle & Symptoms")
@@ -48,9 +69,10 @@ with col1:
     breathing_issue = st.selectbox("Chronic Breathing Difficulty", ["No", "Yes"], index=1)
     throat_discomfort = st.selectbox("Frequent Throat Irritation", ["No", "Yes"], index=1)
     pollution = st.selectbox("High Pollution Exposure", ["No", "Yes"], index=1)
-    family_cancer = st.selectbox("Family History of Lung Cancer", ["No", "Yes"], index=1)
-    family_smoking = st.selectbox("Family History of Heavy Smoking", ["No", "Yes"], index=True)
+    family_cancer = st.selectbox("Family History of Lung Cancer", ["No", "Yes"], index=0)
+    family_smoking = st.selectbox("Family History of Heavy Smoking", ["No", "Yes"], index=0)
     st.markdown("</div>", unsafe_allow_html=True)
+
 with col2:
     st.markdown("<div class='feature-card'>", unsafe_allow_html=True)
     st.subheader("Health & Demographics")
@@ -61,17 +83,20 @@ with col2:
     st.markdown("</div>", unsafe_allow_html=True)
 
 if st.button("Calculate Risk", type="primary", use_container_width=True):
-    with st.spinner("Calculating..."):
+    with st.spinner("Analyzing risk profile..."):
         features = np.array([[
             ["Never", "Former", "Current"].index(smoking),
             ["No", "Yes"].index(breathing_issue),
             ["No", "Yes"].index(throat_discomfort),
             ["No", "Yes"].index(family_smoking),
-            energy, immunity, spo2,
+            energy,
+            immunity,
+            spo2,
             ["No", "Yes"].index(family_cancer),
             ["No", "Yes"].index(pollution),
             age
         ]])
+
         prob = model.predict_proba(features)[0][1]
         risk_pct = round(prob * 100, 1)
 
@@ -83,7 +108,8 @@ if st.button("Calculate Risk", type="primary", use_container_width=True):
             level, color, advice = "High Risk", "#dc2626", "Urgent: Chest CT and oncology referral required."
 
         fig = go.Figure(go.Indicator(
-            mode="gauge+number", value=risk_pct,
+            mode="gauge+number",
+            value=risk_pct,
             title={'text': "Lung Cancer Risk", 'font': {'size': 20}},
             number={'suffix': "%", 'font': {'size': 50}},
             gauge={
@@ -92,13 +118,15 @@ if st.button("Calculate Risk", type="primary", use_container_width=True):
                 'steps': [
                     {'range': [0, 30], 'color': '#dcfce7'},
                     {'range': [30, 70], 'color': '#fef9c3'},
-                    {'range': [70,100], 'color': '#fecaca'}
+                    {'range': [70, 100], 'color': '#fecaca'}
                 ],
-                'threshold': {'line': {'color': "red", 'width': 6}, 'value': 70}
-            }))
+                'threshold': {'line': {'color': "red", 'width': 6}, 'thickness': 0.8, 'value': 70}
+            }
+        ))
         fig.update_layout(height=400, margin=dict(t=60, b=20, l=30, r=30))
 
         st.plotly_chart(fig, use_container_width=True)
+
         st.markdown(f"""
         <div class="result-box">
             <h2 style="color:{color}; margin:0;">{level}</h2>
@@ -108,14 +136,27 @@ if st.button("Calculate Risk", type="primary", use_container_width=True):
         """, unsafe_allow_html=True)
 
         st.session_state.result = {
-            "prob": prob, "level": level, "color": color, "advice": advice,
+            "prob": prob,
+            "level": level,
+            "color": color,
+            "advice": advice,
             "fig": fig,
-            "inputs": {"Age": age, "Smoking": smoking, "Breathing Issue": breathing_issue,
-                       "Throat Irritation": throat_discomfort, "Pollution Exposure": pollution,
-                       "Family Lung Cancer": family_cancer, "Family Smoking": family_smoking,
-                       "Energy Level": energy, "Immune Health": immunity, "SpO₂ (%)": spo2}
+            "risk_pct": risk_pct,
+            "inputs": {
+                "Age": age,
+                "Smoking Status": smoking,
+                "Chronic Breathing Difficulty": breathing_issue,
+                "Frequent Throat Irritation": throat_discomfort,
+                "High Pollution Exposure": pollution,
+                "Family History of Lung Cancer": family_cancer,
+                "Family History of Heavy Smoking": family_smoking,
+                "Energy Level": energy,
+                "Immune Health": immunity,
+                "Resting SpO₂ (%)": spo2
+            }
         }
 
+# ================== PDF GENERATION (FIXED) ==================
 def create_beautiful_pdf():
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
@@ -124,15 +165,15 @@ def create_beautiful_pdf():
 
     # Header
     story.append(Paragraph("AeroLung AI", ParagraphStyle(name="Header", fontSize=28, textColor=colors.HexColor("#1e40af"), spaceAfter=10, alignment=1)))
-    story.append(Paragraph("Lung Cancer Risk Report", ParagraphStyle(name="Sub", fontSize=16, textColor=colors.HexColor("#2563eb"), alignment=1)))
-    story.append(Spacer(1, 0.4*cm))
-    story.append(Paragraph(f"Date: {datetime.now().strftime('%B %d, %Y • %H:%M')}", styles["Normal"]))
-    story.append(Spacer(1, 0.8*cm))
+    story.append(Paragraph("Lung Cancer Risk Assessment Report", ParagraphStyle(name="Sub", fontSize=16, textColor=colors.HexColor("#2563eb"), alignment=1, spaceAfter=20)))
+    story.append(Paragraph(f"Generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", styles["Normal"]))
+    story.append(Spacer(1, 0.6*cm))
 
     # Patient Data Table
-    data = [["Risk Factor", "Patient Value"]]
+    data = [["Risk Factor", "Value"]]
     for k, v in st.session_state.result["inputs"].items():
         data.append([k, str(v)])
+
     table = Table(data, colWidths=[8*cm, 6*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e40af")),
@@ -142,42 +183,55 @@ def create_beautiful_pdf():
         ('FONTSIZE', (0,0), (-1,-1), 11),
         ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f0f9ff")),
         ('GRID', (0,0), (-1,-1), 0.8, colors.grey),
-        ('PADDING', (0,0), (-1,-1), 8),
+        ('PADDING', (0,0), (-1,-1), 10),
     ]))
     story.append(table)
-    story.append(Spacer(1, 0.8*cm))
+    story.append(Spacer(1, 1*cm))
 
-    # Result & Gauge
-    col = st.columns([1, 1.2])
-    with col[0]:
-        story.append(Paragraph(f"<b>Risk Level:</b> <font color='{st.session_state.result['color']}'>{st.session_state.result['level']}</font>", styles["Normal"]))
-        story.append(Paragraph(f"<b>Probability:</b> {st.session_state.result['prob']:.1%}", styles["Normal"]))
-        story.append(Spacer(1, 0.3*cm))
-        story.append(Paragraph("<b>Clinical Recommendation:</b>", styles["Normal"]))
-        story.append(Paragraph(st.session_state.result["advice"], ParagraphStyle(name="Advice", fontSize=11, leading=14)))
+    # Results
+    story.append(Paragraph(f"<b>Risk Level:</b> <font color='{st.session_state.result['color']}'><strong>{st.session_state.result['level']}</strong></font>", styles["Normal"]))
+    story.append(Paragraph(f"<b>Predicted Probability:</b> <strong>{st.session_state.result['prob']:.1%}</strong>", styles["Normal"]))
+    story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph("<b>Clinical Recommendation:</b>", styles["Normal"]))
+    story.append(Paragraph(st.session_state.result["advice"], ParagraphStyle(name="Advice", fontSize=11, leading=14, spaceAfter=20)))
 
-    img_data = st.session_state.result["fig"].to_image(format="png", width=700, height=400)
-    story.append(RLImage(BytesIO(img_data), width=12*cm, height=7*cm))
+    # Insert Gauge Chart (NOW WORKS!)
+    try:
+        img_bytes = st.session_state.result["fig"].to_image(
+            format="png",
+            width=900,
+            height=520,
+            scale=2,
+            engine="kaleido"
+        )
+        img_stream = BytesIO(img_bytes)
+        img = RLImage(img_stream, width=15*cm, height=9*cm)
+        img.hAlign = 'CENTER'
+        story.append(img)
+    except Exception as e:
+        story.append(Paragraph(f"Warning: Risk gauge could not be included in PDF (error: {str(e)})", styles["Normal"]))
 
-    story.append(Spacer(1, 0.8*cm))
-    story.append(Paragraph("Disclaimer: This tool is for screening only • Not a substitute for medical diagnosis • Consult a physician.",
+    story.append(Spacer(1, 1*cm))
+    story.append(Paragraph("Disclaimer: This tool is for educational and screening purposes only. It is not a substitute for professional medical diagnosis or advice.", 
                            ParagraphStyle(name="Disc", fontSize=9, textColor=colors.grey, alignment=1)))
 
     doc.build(story)
     return buffer.getvalue()
 
+# Show Download Button Only After Result
 if "result" in st.session_state:
-    pdf = create_beautiful_pdf()
-    b64 = base64.b64encode(pdf).decode()
-    st.markdown(f'''
-    <a href="data:application/pdf;base64,{b64}" download="AeroLung_Report_{datetime.now().strftime("%Y%m%d_%H%M")}.pdf">
-        <button style="background:#dc2626; color:white; padding:1rem 3rem; border:none; border-radius:12px; font-size:1.2rem; cursor:pointer; width:100%;">
-            Download PDF Report (Click)
+    pdf_data = create_beautiful_pdf()
+    b64 = base64.b64encode(pdf_data).decode()
+    href = f'''
+    <a href="data:application/pdf;base64,{b64}" download="AeroLung_AI_Report_{datetime.now().strftime("%Y%m%d_%H%M")}.pdf">
+        <button style="background:#dc2626; color:white; padding:1rem 3rem; border:none; border-radius:12px; font-size:1.2rem; cursor:pointer; width:100%; font-weight:bold;">
+            Download Professional PDF Report
         </button>
     </a>
-    ''', unsafe_allow_html=True)
+    '''
+    st.markdown(href, unsafe_allow_html=True)
 
 st.markdown("---")
 st.markdown("<p style='text-align:center; color:#6b7280; font-size:0.95rem;'>"
-            "This AI tool is for screening purposes only • Not a substitute for professional medical diagnosis</p>",
+            "© 2025 AeroLung AI • For screening purposes only • Always consult a qualified physician</p>",
             unsafe_allow_html=True)
